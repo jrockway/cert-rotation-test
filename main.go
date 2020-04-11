@@ -45,6 +45,12 @@ type certs struct {
 	dir       string
 }
 
+func (c *certs) Cleanup() {
+	if err := os.RemoveAll(c.dir); err != nil {
+		log.Printf("failed to clean up tmpdir %s: %v", c.dir, err)
+	}
+}
+
 func generateCert() (*certs, error) {
 	tmpdir, err := ioutil.TempDir("", "certs-")
 	if err != nil {
@@ -156,8 +162,9 @@ func get(ctx context.Context, cfg *tls.Config) error {
 	return errors.New("never received an acceptable response")
 }
 
-func main() {
+func run() error {
 	ctx, c := context.WithCancel(context.Background())
+	defer c()
 	sigCh := make(chan os.Signal)
 	signal.Notify(sigCh, os.Interrupt)
 	go func() {
@@ -173,24 +180,29 @@ func main() {
 
 	certs, err := generateCert()
 	if err != nil {
-		log.Fatalf("failed to write certs: %v", err)
+		return fmt.Errorf("failed to write certs: %w", err)
 	}
+	defer certs.Cleanup()
+
 	go runEnvoy(ctx)
+
 	if err := get(ctx, certs.tlsConfig); err != nil {
-		log.Printf("failed to make initial request: %v", err)
+		return fmt.Errorf("failed to make initial request: %w", err)
 	}
+
 	newCerts, err := generateCert()
 	if err != nil {
-		log.Printf("failed to write new certs: %v", err)
+		return fmt.Errorf("failed to write new certs: %w", err)
 	}
+	defer newCerts.Cleanup()
 	if err := get(ctx, newCerts.tlsConfig); err != nil {
-		log.Printf("failed to make request after cert rotation: %v", err)
+		return fmt.Errorf("failed to make request after cert rotation: %w", err)
 	}
-	c()
-	if err := os.RemoveAll(certs.dir); err != nil {
-		log.Printf("failed to clean up tmpdir %s: %v", certs.dir, err)
-	}
-	if err := os.RemoveAll(newCerts.dir); err != nil {
-		log.Printf("failed to clean up tmpdir %s: %v", certs.dir, err)
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
 	}
 }
