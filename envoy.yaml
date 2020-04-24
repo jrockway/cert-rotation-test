@@ -1,3 +1,10 @@
+node:
+    id: test
+    cluster: test
+admin:
+    access_log_path: /tmp/admin_access.log
+    address:
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
 static_resources:
     listeners:
         - name: test
@@ -10,14 +17,15 @@ static_resources:
               - name: "envoy.listener.tls_inspector"
                 typed_config: {}
           filter_chains:
-              - tls_context:
-                    common_tls_context:
-                        alpn_protocols: ["h2", "http/1.1"]
-                        tls_certificates:
-                            - certificate_chain:
-                                  filename: "certs/tls.crt"
-                              private_key:
-                                  filename: "certs/tls.key"
+              - transport_socket:
+                    name: "envoy.transport_sockets.tls"
+                    typed_config:
+                        "@type": "type.googleapis.com/envoy.api.v2.auth.DownstreamTlsContext"
+                        common_tls_context:
+                            alpn_protocols: ["h2", "http/1.1"]
+                            tls_certificate_sds_secret_configs:
+                                sds_config:
+                                    path: /home/jrockway/projects/cert-rotation-test/sds.yaml
                 filters:
                     - name: envoy.http_connection_manager
                       typed_config:

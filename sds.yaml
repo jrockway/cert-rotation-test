@@ -1,0 +1,7 @@
+resources:
+    - "@type": "type.googleapis.com/envoy.api.v2.auth.Secret"
+      tls_certificate:
+          certificate_chain:
+              filename: "/tmp/certs/tls.crt"
+          private_key:
+              filename: "/tmp/certs/tls.key"

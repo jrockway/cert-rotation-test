@@ -10,18 +10,19 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math/big"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"time"
 )
 
 func runEnvoy(ctx context.Context) {
-	cmd := exec.CommandContext(ctx, "envoy", "-c", "envoy.yaml", "-l", "critical")
+	//cmd := exec.CommandContext(ctx, "envoy", "-c", "envoy.yaml", "-l", "trace")
+	cmd := exec.CommandContext(ctx, "/home/jrockway/tmp/envoy/bazel-bin/source/exe/envoy-static", "-c", "envoy.yaml", "--component-log-level", "file:debug")
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	if err := cmd.Start(); err != nil {
@@ -45,17 +46,11 @@ type certs struct {
 	dir       string
 }
 
-func (c *certs) Cleanup() {
-	if err := os.RemoveAll(c.dir); err != nil {
-		log.Printf("failed to clean up tmpdir %s: %v", c.dir, err)
-	}
-}
-
-func generateCert() (*certs, error) {
-	tmpdir, err := ioutil.TempDir("", "certs-")
-	if err != nil {
+func generateCert(dir, name string) (*certs, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+
 	// This code is from https://golang.org/src/crypto/tls/generate_cert.go
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -74,7 +69,7 @@ func generateCert() (*certs, error) {
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Organization: []string{"Acme Co"},
+			Organization: []string{name},
 		},
 		NotBefore: notBefore,
 		NotAfter:  notAfter,
@@ -88,7 +83,7 @@ func generateCert() (*certs, error) {
 	if err != nil {
 		return nil, err
 	}
-	certOut, err := os.Create(tmpdir + "/tls.crt")
+	certOut, err := os.Create(filepath.Join(dir, "tls.crt"))
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +94,7 @@ func generateCert() (*certs, error) {
 		return nil, err
 	}
 
-	keyOut, err := os.OpenFile(tmpdir+"/tls.key", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	keyOut, err := os.OpenFile(filepath.Join(dir, "tls.key"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -113,12 +108,6 @@ func generateCert() (*certs, error) {
 	if err := keyOut.Close(); err != nil {
 		return nil, err
 	}
-	if err := os.Symlink(tmpdir, "certs.tmp"); err != nil {
-		return nil, err
-	}
-	if err := os.Rename("certs.tmp", "certs"); err != nil {
-		return nil, err
-	}
 	cert, err := x509.ParseCertificate(derBytes)
 	if err != nil {
 		return nil, err
@@ -128,7 +117,28 @@ func generateCert() (*certs, error) {
 	cfg := &tls.Config{
 		RootCAs: pool,
 	}
-	return &certs{tlsConfig: cfg, dir: tmpdir}, nil
+	return &certs{tlsConfig: cfg, dir: dir}, nil
+}
+
+func atomicLink(tmpdir, dir string) error {
+	if err := os.Symlink(dir, filepath.Join(tmpdir, "..tmp")); err != nil {
+		return err
+	}
+	if err := os.Rename(filepath.Join(tmpdir, "..tmp"), filepath.Join(tmpdir, "..data")); err != nil {
+		return err
+	}
+	return nil
+}
+
+func printTree(tmpdir string) {
+	cmd := exec.Command("ls", "-la", "certs")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Run()
+	cmd = exec.Command("ls", "-laR", tmpdir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Run()
 }
 
 func get(ctx context.Context, cfg *tls.Config) error {
@@ -178,23 +188,53 @@ func run() error {
 		}
 	}()
 
-	certs, err := generateCert()
+	tmpdir := "/tmp/certs"
+	cleanupTmp := func() {
+		log.Printf("removing tmpdir %s", tmpdir)
+		if err := os.RemoveAll(tmpdir); err != nil {
+			log.Printf("failed to clean up tmpdir %s: %v", tmpdir, err)
+		}
+	}
+	cleanupTmp()
+	if err := os.MkdirAll(tmpdir, 0o755); err != nil {
+		return err
+	}
+	defer cleanupTmp()
+	if err := os.Symlink("..data/tls.crt", filepath.Join(tmpdir, "tls.crt")); err != nil {
+		return err
+	}
+	if err := os.Symlink("..data/tls.key", filepath.Join(tmpdir, "tls.key")); err != nil {
+		return err
+	}
+
+	certs, err := generateCert(filepath.Join(tmpdir, "..a"), "a")
 	if err != nil {
 		return fmt.Errorf("failed to write certs: %w", err)
 	}
-	defer certs.Cleanup()
+	if err := atomicLink(tmpdir, "..a"); err != nil {
+		return err
+	}
 
 	go runEnvoy(ctx)
+	time.Sleep(time.Second)
+	printTree(tmpdir)
 
 	if err := get(ctx, certs.tlsConfig); err != nil {
 		return fmt.Errorf("failed to make initial request: %w", err)
 	}
 
-	newCerts, err := generateCert()
+	newCerts, err := generateCert(filepath.Join(tmpdir, "..b"), "b")
 	if err != nil {
 		return fmt.Errorf("failed to write new certs: %w", err)
 	}
-	defer newCerts.Cleanup()
+	if err := atomicLink(tmpdir, "..b"); err != nil {
+		return err
+	}
+
+	printTree(tmpdir)
+	log.Println("sleeping")
+	time.Sleep(5 * time.Second)
+
 	if err := get(ctx, newCerts.tlsConfig); err != nil {
 		return fmt.Errorf("failed to make request after cert rotation: %w", err)
 	}
