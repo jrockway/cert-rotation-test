@@ -21,8 +21,8 @@ import (
 )
 
 func runEnvoy(ctx context.Context) {
-	//cmd := exec.CommandContext(ctx, "envoy", "-c", "envoy.yaml", "-l", "trace")
-	cmd := exec.CommandContext(ctx, "/home/jrockway/tmp/envoy/bazel-bin/source/exe/envoy-static", "-c", "envoy.yaml", "--component-log-level", "file:debug")
+	cmd := exec.CommandContext(ctx, "envoy", "-c", "envoy.yaml", "-l", "trace")
+	//	cmd := exec.CommandContext(ctx, "/home/jrockway/tmp/envoy/bazel-bin/source/exe/envoy-static", "-c", "envoy.yaml", "--component-log-level", "file:debug")
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	if err := cmd.Start(); err != nil {
