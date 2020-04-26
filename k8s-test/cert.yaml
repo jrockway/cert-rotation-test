@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1alpha2
+kind: Certificate
+metadata:
+    name: envoy-test
+spec:
+    secretName: envoy-test-tls
+    duration: 744h
+    issuerRef:
+        name: ca-issuer
+        kind: ClusterIssuer
+    dnsNames:
+        - test

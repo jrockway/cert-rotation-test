@@ -1,0 +1,16 @@
+namespace: envoy-test
+commonLabels:
+    app: envoy-test
+resources:
+    - namespace.yaml
+    - cert.yaml
+    - deployment.yaml
+configMapGenerator:
+    - name: envoy-test-config
+      files:
+          - envoy.yaml
+          - sds.yaml
+images:
+    - name: envoy
+      newName: envoyproxy/envoy
+      newTag: v1.14.1

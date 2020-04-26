@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: envoy-test
+spec:
+    replicas: 1
+    template:
+        spec:
+            containers:
+                - name: envoy
+                  image: envoy
+                  command:
+                      - "envoy"
+                  args:
+                      - "-c"
+                      - "/etc/envoy/envoy.yaml"
+                  volumeMounts:
+                      - name: envoy-test-config
+                        mountPath: /etc/envoy
+                      - name: certs
+                        mountPath: /certs
+                  ports:
+                      - name: envoy-admin
+                        containerPort: 9901
+                      - name: https
+                        containerPort: 10000
+            volumes:
+                - name: envoy-test-config
+                  configMap:
+                      name: envoy-test-config
+                - name: certs
+                  secret:
+                      secretName: envoy-test-tls
